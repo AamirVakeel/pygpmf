@@ -5,6 +5,7 @@ from xml.etree import ElementTree as ET
 import gpxpy
 from . import parse
 import numpy as np
+import struct
 
 
 GPSData = namedtuple("GPSData",
@@ -45,11 +46,51 @@ def extract_gps_blocks(stream):
         is_gps = False
         for elt in s.value:
             content.append(elt)
-            if elt.key == "GPS5":
+            if elt.key == "GPS9":
                 is_gps = True
         if is_gps:
             yield content
 
+# Function to decode a single 32-byte GPS9 entry
+def parse_gps9_payload_block(block_bytes, scalers):
+    # if len(block_bytes) != 32:
+    #     raise ValueError("Block must be exactly 32 bytes")
+
+    # unpacked = struct.unpack(">iibbhhhhhhhhh", block_bytes)
+    (
+        lat, lon, alt,
+        speed2d, speed3d,
+        days, secs,
+        dop, fix
+    ) = struct.unpack(">iiiiiiihh", block_bytes)
+    return {
+        "latitude": lat / scalers[0],
+        "longitude": lon / scalers[1],
+        "altitude": alt / scalers[2],
+        "speed2d": speed2d / scalers[3],
+        "speed3d": speed3d / scalers[4],
+        "days": days / scalers[5],
+        "secs": secs / scalers[6],
+        "dop": dop / scalers[7],
+        "fix": fix / scalers[8],
+    }
+
+# Function to process entire GPS9 binary stream
+def parse_gps9_data(binary_data, scalers):
+    block_size = 32
+    num_blocks = len(binary_data) // block_size
+    data = []
+
+    for i in range(num_blocks):
+        block = binary_data[i*block_size:(i+1)*block_size]
+        data.append(parse_gps9_payload_block(block[:32], scalers))
+
+    return data
+
+def calculate_date(days, seconds):
+    j2000_epoch = datetime(2000, 1, 1, 0, 0, 0)
+    final_time = j2000_epoch + timedelta(days=days, seconds=seconds)
+    return final_time.strftime('%Y-%m-%d %H:%M:%S.%f')
 
 def parse_gps_block(gps_block):
     """Turn GPS data blocks into `GPSData` objects
@@ -68,28 +109,32 @@ def parse_gps_block(gps_block):
         s.key: s for s in gps_block
     }
 
-    gps5_array = block_dict["GPS5"].value
-    scal_array = block_dict["SCAL"].value
-    if gps5_array.size > 0 and scal_array.size > 0:
-        gps_data = gps5_array * 1.0 / scal_array
-    else:
-        gps_data = None
+    gps_data_object = parse_gps9_data(block_dict.get("GPS9").value, block_dict.get("SCAL").value)
 
-    if gps_data is not None:
-        latitude, longitude, altitude, speed_2d, speed_3d = gps_data.T
+    if gps_data_object is not None:
+        # latitude, longitude, altitude, speed_2d, speed_3d = gps_data.T
+        latitude = np.array([float(each["latitude"]) for each in gps_data_object])
+        longitude = np.array([float(each["longitude"]) for each in gps_data_object])
+        altitude = np.array([float(each["altitude"]) for each in gps_data_object])
+        speed_2d = np.array([float(each["speed2d"]) for each in gps_data_object])
+        speed_3d = np.array([float(each["speed3d"]) for each in gps_data_object])
+        days = np.array([each["days"] for each in gps_data_object])
+        secs = np.array([each["secs"] for each in gps_data_object])
+        dop = np.array([each["dop"] for each in gps_data_object])
+        fix = np.array([each["fix"] for each in gps_data_object])
 
         return GPSData(
             description=block_dict["STNM"].value,
-            timestamp=block_dict["GPSU"].value,
-            precision=block_dict["GPSP"].value / 100.,
-            fix=block_dict["GPSF"].value,
+            timestamp=calculate_date(days[0], secs[0]),
+            precision=dop[0],
+            fix=fix[0],
             latitude=latitude,
             longitude=longitude,
             altitude=altitude,
             speed_2d=speed_2d,
             speed_3d=speed_3d,
-            units=block_dict["UNIT"].value,
-            npoints=len(gps_data)
+            units=block_dict["UNIT"].value[:5],
+            npoints=len(gps_data_object)
         )
     else:
         return None
