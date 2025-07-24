@@ -41,6 +41,7 @@ def extract_gps_blocks(stream):
     gps_items_generator: generator
         Generator of lists of `KVLItem` objects
     """
+    gotGPS9 = False;
     for s in parse.filter_klv(stream, "STRM"):
         content = []
         is_gps = False
@@ -49,7 +50,19 @@ def extract_gps_blocks(stream):
             if elt.key == "GPS9":
                 is_gps = True
         if is_gps:
-            yield content
+            gotGPS9 = True;
+            yield {"content": content, "type": "GPS9"}
+    if(gotGPS9 == False):
+        for s in parse.filter_klv(stream, "STRM"):
+            content = []
+            is_gps = False
+            for elt in s.value:
+                content.append(elt)
+                if elt.key == "GPS5":
+                    is_gps = True
+            if is_gps:
+                yield {"content": content, "type": "GPS5"}
+
 
 # Function to decode a single 32-byte GPS9 entry
 def parse_gps9_payload_block(block_bytes, scalers):
@@ -92,7 +105,14 @@ def calculate_date(days, seconds):
     final_time = j2000_epoch + timedelta(days=days, seconds=seconds)
     return final_time.strftime('%Y-%m-%d %H:%M:%S.%f')
 
-def parse_gps_block(gps_block):
+def parse_gps_block(gps_block_map):
+
+    gps_block = gps_block_map["content"]
+    if(gps_block_map.get("type") == "GPS5"):
+        return parse_gps_blockG5(gps_block)
+    
+    print("GETTING GPS9")
+    
     """Turn GPS data blocks into `GPSData` objects
 
     Parameters
@@ -235,3 +255,47 @@ def make_pgx_segment(gps_blocks, first_only=False, speeds_as_extensions=True):
                 track_segment.points.append(tp)
 
     return track_segment
+
+def parse_gps_blockG5(gps_block):
+    print("GETTING GPS5")
+    """Turn GPS data blocks into `GPSData` objects
+
+    Parameters
+    ----------
+    gps_block: list of KVLItem
+        A list of KVLItem corresponding to a GPS data block.
+
+    Returns
+    -------
+    gps_data: GPSData
+        A GPSData object holding the GPS information of a block.
+    """
+    block_dict = {
+        s.key: s for s in gps_block
+    }
+
+    gps5_array = block_dict["GPS5"].value
+    scal_array = block_dict["SCAL"].value
+    if gps5_array.size > 0 and scal_array.size > 0:
+        gps_data = gps5_array * 1.0 / scal_array
+    else:
+        gps_data = None
+
+    if gps_data is not None:
+        latitude, longitude, altitude, speed_2d, speed_3d = gps_data.T
+
+        return GPSData(
+            description=block_dict["STNM"].value,
+            timestamp=block_dict["GPSU"].value,
+            precision=block_dict["GPSP"].value / 100.,
+            fix=block_dict["GPSF"].value,
+            latitude=latitude,
+            longitude=longitude,
+            altitude=altitude,
+            speed_2d=speed_2d,
+            speed_3d=speed_3d,
+            units=block_dict["UNIT"].value,
+            npoints=len(gps_data)
+        )
+    else:
+        return None
