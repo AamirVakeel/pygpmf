@@ -145,7 +145,7 @@ def parse_gps_block(gps_block_map):
 
         return GPSData(
             description=block_dict["STNM"].value,
-            timestamp=calculate_date(days[0], secs[0]),
+            timestamp=[calculate_date(eachD, eachS) for eachD,eachS in zip(days,secs)],
             precision=dop[0],
             fix=fix[0],
             latitude=latitude,
@@ -208,7 +208,7 @@ def make_pgx_segment(gps_blocks, first_only=False, speeds_as_extensions=True):
 
     for gps_data in gps_blocks:
         if gps_data is not None:
-            time = datetime.strptime(gps_data.timestamp, "%Y-%m-%d %H:%M:%S.%f")
+            time = datetime.strptime(gps_data.timestamp, "%Y-%m-%d %H:%M:%S.%f") if type(gps_data.timestamp) == type("") else [datetime.strptime(each, "%Y-%m-%d %H:%M:%S.%f") for each in gps_data.timestamp]
             # Reference says the frequency is about 18 Hz and other GPS data about 1Hz
 
             if((type(gps_data.latitude) != type(np.array([]))) and (type(gps_data.longitude) != type(np.array([])))):
@@ -218,7 +218,7 @@ def make_pgx_segment(gps_blocks, first_only=False, speeds_as_extensions=True):
                     elevation=gps_data.altitude,
                     speed=gps_data.speed_3d,
                     position_dilution=gps_data.precision,
-                    time=time,
+                    time=datetime.strptime(gps_data.timestamp, "%Y-%m-%d %H:%M:%S.%f"),
                     symbol="Square",
                 )
 
@@ -241,7 +241,7 @@ def make_pgx_segment(gps_blocks, first_only=False, speeds_as_extensions=True):
                     elevation=gps_data.altitude[i],
                     speed=gps_data.speed_3d[i],
                     position_dilution=gps_data.precision,
-                    time=time + i * dt,
+                    time=time + i * dt if type(time) == datetime else time[i],
                     symbol="Square",
                 )
 
@@ -249,7 +249,7 @@ def make_pgx_segment(gps_blocks, first_only=False, speeds_as_extensions=True):
 
                 if speeds_as_extensions:
 
-                    for e in _make_speed_extensions(gps_data, 0):
+                    for e in _make_speed_extensions(gps_data, i):
                         tp.extensions.append(e)
 
                 track_segment.points.append(tp)
