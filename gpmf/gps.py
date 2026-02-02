@@ -131,7 +131,7 @@ def parse_gps_block(gps_block_map):
 
     gps_data_object = parse_gps9_data(block_dict.get("GPS9").value, block_dict.get("SCAL").value)
 
-    if gps_data_object is not None:
+    if (gps_data_object is not None) and (len(gps_data_object) > 0):
         # latitude, longitude, altitude, speed_2d, speed_3d = gps_data.T
         latitude = np.array([float(each["latitude"]) for each in gps_data_object])
         longitude = np.array([float(each["longitude"]) for each in gps_data_object])
